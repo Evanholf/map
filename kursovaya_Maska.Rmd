@@ -1,0 +1,168 @@
+---
+title: "Интерактивная визуализация данных на карте России."
+author: "Силкина Мария"
+date: "26 июня 2016 г."
+output: html_document
+lang: russian
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 
+
+Этот документ посвящен описанию методов построения интерактивных карт в R. 
+
+## Highcharter, работа с geojson
+Для начала нанесем на карту Москвы точки, отображающие геоположения ветеринарных учреждений. Для этого нам понадобятся две основные вещи: 
+
+1. **geojson**-файл Москвы, который можно найти в Интернете. Например, на сайте [GIS-LAB](http://gis-lab.info/qa/moscow-atd.html) (нам понадобятся административные округа).
+
+2. Геоданные нужных нам учреждений. Последние возьмем с [Портала Открытых данных Москвы](http://data.mos.ru/), где их можно получить, скачивая вручную, либо через API. Там даже есть изображение доступных данных на [карте](http://atlas.mos.ru/?lang=ru&z=2&ll=37.936117614208726%2C55.74434070349103&l=6854).
+
+Перейдем к написанию кода. Во-первых, необходимо подключить нужные библиотеки и устанавливаем недостающие пакеты. Для изображения карты нам понадобится пакет **highcharter**.
+
+```{r libraries, message=FALSE}
+library("dplyr")
+library("readr")
+library("httr")
+library("rvest")
+library("geojsonio")
+library("rgdal")
+library("highcharter")
+library("jsonlite")
+library("magrittr")
+```
+
+Теперь скачиваем карту Москвы в формате geojson и сами геоданные Ветеринарных учреждений. С помощью пакета highcharter преобразуем их в карту.
+
+```{r map, echo=TRUE, message=FALSE}
+map <- geojson_read("C:/Users/Hp/Desktop/Интерактивная карта России/files/ao.geojson")
+animaljson2 <- geojson_read("C:/Users/Hp/Desktop/Интерактивная карта России/files/anima.json")
+
+highchart(type = "map") %>% 
+  hc_title(text = "<b> Ветеринарные учреждения </b>") %>% 
+  hc_add_series(mapData = map, showInLegend = FALSE,
+                nullColor = "lightblue") %>% 
+  hc_add_series(data = animaljson2, type = "mappoint", dataLabels = list(enabled = FALSE),
+                name = "Ветеринарное учреждение", color = "steelblue
+",
+                tooltip = list(pointFormat = "<strong>{point.properties.name}: </strong> <br> 
+                               {point.properties.address}" )) %>% 
+  hc_mapNavigation(enabled = TRUE) %>% 
+  hc_add_theme(hc_theme_sandsignika())
+
+```
+
+Как видим, функция **"hc_add_series"** позволяет нам накладывать слои поверх карты. За интерактивность при наведении мышкой отвечает **tooltip** - нужными нам переменными являются название учреждение(name) и его адрес(address), которые как раз располагаются в файле **animaljson2** в свойстве "properties". 
+Функция **hc_mapNavigation** даёт возможность приближать карту, а **hc_add_theme** выбирает тему карты - другие варианты предложены на [сайте пакета highcharter](http://jkunst.com/highcharter/themes.html).
+
+Кроме того, на карту можно аналогично нанести несколько рядов данных. Нанесем специализированные и обычные центры труда и занятости. Источник данных [тот же](http://atlas.mos.ru/?lang=ru&z=2&ll=37.93800588935439%2C55.72317389638372&l=2743%2C3714#).
+
+```{r legends, message=FALSE}
+adapt <- geojson_read("C:/Users/Hp/Desktop/Интерактивная карта России/files/adapt.json")
+zan <- geojson_read("C:/Users/Hp/Desktop/Интерактивная карта России/files/zan.json")
+
+highchart(type = "map") %>% 
+  hc_title(text = "<b> Трудоустройство </b>") %>% 
+  hc_add_series(mapData = map, showInLegend = FALSE,
+                nullColor = "azure
+                ") %>% 
+  hc_add_series(data = adapt, type = "mappoint", dataLabels = list(enabled = FALSE),
+                name = "Специализированный центр труда и занятости", color = "lightslateblue
+
+                ",
+                tooltip = list(pointFormat = "<strong>{point.properties.name}: </strong> <br> 
+                               {point.properties.address}" )) %>% 
+  hc_add_series(data = zan, type = "mappoint", dataLabels = list(enabled = FALSE),
+                name = "Центр занятости населения", color = "gold
+                ",
+                tooltip = list(pointFormat = "<strong>{point.properties.name}: </strong> <br> 
+                               {point.properties.address}" )) %>% 
+  hc_mapNavigation(enabled = TRUE) %>% 
+  hc_legend(layout = "horisontal", align = "right") %>%
+  hc_add_theme(hc_theme_db())
+```
+
+
+## Leaflet
+
+Однако порой карта более полезна и привычна для глаза, если на ней видны другие объекты, к примеру, дороги или дома. В таком случае, нам поможет пакет **leaflet**. Отобразим таким образом парки Москвы, в которых есть летние открытые спортивные площадки. Для этого нам понадобится файл формата [csv с необходимыми данными](https://raw.githubusercontent.com/Evanholf/map/master/sportareas.csv).
+
+```{r pressure, message=FALSE}
+library("leaflet")
+library("ggmap")
+```
+
+В изначально скачанном файле много ненужных колонок, поэтому для удобства сократим их до трёх нужных, которые затем переименуем.
+```{r map2, echo=TRUE, message=FALSE}
+sport <- read.csv("https://raw.githubusercontent.com/Evanholf/map/master/sportareas.csv", encoding="UTF-8")
+sport2 <- sport[,c(12,64,65)]
+names(sport2) <- c("Название", "Longitude", "Latitude")
+leaflet(sport2) %>% addTiles() %>% 
+  addMarkers(popup = sport2$Название)
+
+```
+
+Получили карту с маркировками и называниями парков. Как видим, слишком большое количество маркеров может затруднить чтение карты. Для решения данной проблемы существует функция **clusterOptions**. Теперь наша карта выглядит лучше.
+
+```{r map3, echo=TRUE, message=FALSE}
+leaflet(sport2) %>%
+addTiles() %>% 
+  addCircleMarkers(data = sport2, radius = 5, popup = sport2$Название,
+                   clusterOptions = markerClusterOptions())
+
+```
+
+## Полигоны
+Теперь построим карту России с полигонами. Будем наносить на нее данные по средней заработной плате в России за 2015 год. Для этого нам понадобятся:
+
+1. Карта субъектов РФ в формате geojson. 
+  Её можно найти на сайте <http://code.highcharts.com/mapdata/>. Однако проблема в том, что в ее свойствах нет названий регионов на русском языке, а мы хотим, чтобы карта выглядела красиво. Для этого нам надо добавить в geojson-файл столбец с русскими названиями. Это можно сделать двумя способами - с помощью программы QGIS (как описано [здесь](http://gis.stackexchange.com/questions/109315/adding-properties-to-geojson-file/109356), а также загрузив исходный код на <http://geojson.io/> и добавив столбец с названием "name". 
+  
+  Итоговый файл geojson, который будет использоваться в примере, можно найти [тут](https://github.com/Evanholf/map).
+
+2. По последней ссылке можно также найти необходимые данные по заработной плате, согласно Росстату (*data3.scv*). Загрузим их в R и посмотрим, как выглядят перые 6 строк:
+
+```{r mdataview, echo=TRUE}
+map2<-geojson_read("C:/Users/Hp/Desktop/Интерактивная карта России/files/map2.geojson")
+mdata<-read.csv("https://raw.githubusercontent.com/Evanholf/map/master/data3.csv", encoding="UTF-8")
+mdata[ c(1:6) ,]
+```
+
+Зачем нужен столбец **code**? <br>
+А затем, что нам нужно будет как-то связать наши данные с нужными названиями регионов в geojson-файле. В нём уже есть столбец с такими же кодами регионов, который называется **postal-code**. В этом нам поможет функция **joinBy**.
+```{r Russia_polygons, echo=TRUE}
+highchart() %>% 
+  hc_title(text = "Уровень средней заработной платы за 2015 г.") %>% 
+  hc_add_series_map(map = map2, df = mdata,
+                    value = "wage", joinBy = c("postal-code", "code"),
+                    name = "Заработная плата в рублях", borderWidth = 0.1) %>% 
+  hc_legend(layout = "horisontal", reversed = TRUE,
+            floating = TRUE, align = "right") %>% 
+  hc_mapNavigation(enabled = TRUE, align = "right") %>% 
+  hc_tooltip(valueDecimals = 2)
+```
+
+А как сделать так, чтобы были отображены только регионы, где средняя заработная плата больше, к примеру, 30000 рублей? <br>
+Для этого создадим в нашей таблице данных новую колонку, которая будет равна столбцу **wage**. Затем заменим значения, меньшие 30000, на NA. Тогда при нанесении на карту соответствующие страны не будут учитываться. 
+
+```{r Russia2, echo=TRUE}
+mdata$wageover30 <-mdata$wage
+mdata$wageover30[mdata$wageover30<30000] <- NA
+```
+
+Аналогично первому варианту отобразим новую карту, только теперь уже отображаться будет столбец **wageover30**:
+
+```{r Russia_polygons2, echo=TRUE}
+highchart() %>% 
+  hc_title(text = "Регионы со средней заработной платой, большей 30000 р.") %>% 
+  hc_add_series_map(map = map2, df = mdata,
+                    value = "wageover30", joinBy = c("postal-code", "code"),
+                    name = "Заработная плата в рублях", borderWidth = 0.1) %>% 
+  hc_legend(layout = "horisontal", reversed = TRUE,
+            floating = TRUE, align = "right") %>% 
+  hc_mapNavigation(enabled = TRUE, align = "right") %>% 
+  hc_tooltip(valueDecimals = 2)
+```
